@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EdgeGuard AI – Machine Health</title>
+<style>
+:root{--bg:#0e1621;--panel:#16212e;--line:#243447;--tx:#e8eef5;--mu:#8ba0b6;--safe:#38d39f;--warn:#ffb547;--danger:#ff5a5f;--st:var(--safe);
+--mono:ui-monospace,Consolas,"Cascadia Mono",monospace;--sans:"Segoe UI",system-ui,-apple-system,Roboto,sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 var(--sans)}
+header{display:flex;align-items:center;gap:16px;padding:14px 24px;border-bottom:1px solid var(--line)}
+header h1{font-size:18px;margin:0;letter-spacing:.3px}header small{color:var(--mu)}
+.sp{flex:1}.pill{font:600 12px var(--mono);padding:4px 10px;border-radius:99px;border:1px solid var(--line);color:var(--mu)}
+.pill.live{color:var(--safe);border-color:var(--safe)}.pill.sim{color:var(--warn);border-color:var(--warn)}.pill.off{color:var(--danger);border-color:var(--danger)}
+main{padding:20px 24px;max-width:1280px;margin:0 auto;display:grid;gap:18px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+#hero{display:grid;grid-template-columns:1.2fr 1fr 1.4fr;gap:18px;border-left:6px solid var(--st)}
+#state{font:700 44px/1 var(--mono);color:var(--st)}#state.DANGER{animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.45}}
+.lbl{color:var(--mu);font-size:13px}.big{font:700 34px var(--mono)}
+#eta{font:600 20px var(--mono)}.note{color:var(--mu);font-size:12px;margin-top:6px}
+.cards{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
+.card .v{font:700 30px var(--mono);margin:6px 0}.card .u{font-size:14px;color:var(--mu)}
+.chip{font:600 11px var(--mono);padding:2px 8px;border-radius:4px;background:var(--c);color:#06121c}
+.bar{position:relative;height:6px;background:var(--line);border-radius:3px;margin-top:10px}
+.bar i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--c)}
+.bar b{position:absolute;top:-3px;width:2px;height:12px;background:var(--mu)}
+.charts{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}.charts canvas{width:100%;height:170px;display:block}
+.bottom{display:grid;grid-template-columns:1fr 1.6fr;gap:18px}
+button{font:600 14px var(--sans);padding:9px 18px;border-radius:6px;border:1px solid var(--line);background:#1d2c3d;color:var(--tx);cursor:pointer}
+button.on{background:#134e3a;border-color:var(--safe)}button.off{background:#5a1f26;border-color:var(--danger)}
+input{font:14px var(--mono);width:90px;padding:8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--tx)}
+#log{max-height:230px;overflow:auto;font:13px var(--mono)}#log div{padding:5px 0;border-bottom:1px solid var(--line)}
+h2{font-size:14px;margin:0 0 10px;color:var(--mu);font-weight:600}
+@media(max-width:900px){#hero,.bottom,.charts{grid-template-columns:1fr}.cards{grid-template-columns:repeat(2,1fr)}}
+</style></head><body>
+<header><h1>EdgeGuard AI</h1><small>Industrial machine health</small><span class="sp"></span>
+<span id="pill" class="pill">CONNECTING</span><span id="clock" class="pill"></span></header>
+<main>
+<section id="hero" class="panel">
+ <div><div class="lbl">Machine state</div><div id="state">--</div><div class="note" id="why"></div></div>
+ <div><div class="lbl">Health score</div><div class="big" id="health">--</div><div class="note">100 = at normal baseline, 0 = at a danger limit</div></div>
+ <div><div class="lbl">Estimated time to a danger limit</div><div id="eta">--</div>
+ <div class="note">Straight-line trend of the last 5 min. A rough estimate, not a validated failure prediction.</div></div>
+</section>
+<section class="cards" id="cards"></section>
+<section class="charts" id="charts"></section>
+<section class="bottom">
+ <div class="panel"><h2>Motor control</h2>
+  <div>Motor: <b id="motor">--</b></div>
+  <p><input id="pin" type="password" placeholder="PIN"> </p>
+  <button class="on" onclick="motor('on')">Motor ON</button> <button class="off" onclick="motor('off')">Motor OFF</button>
+  <div class="note" id="mmsg">Remote start is refused while the machine is in DANGER.</div></div>
+ <div class="panel"><h2>Alert log (this session) · readings are saved in logs/*.csv</h2><div id="log"></div></div>
+</section></main>
+<script>
+const S={temp:{n:'Temperature',u:'°C',dp:1,w:35,d:40,r:[20,50],c:'#ff8a5b'},vib:{n:'Vibration',u:'raw',dp:0,d:1500,r:[0,2000],c:'#b79cff'},
+cur:{n:'Current',u:'A',dp:2,w:2.5,d:4,r:[0,5],c:'#4fc3f7'},volt:{n:'Voltage',u:'V',dp:2,w:10,d:14,r:[8,15],c:'#ffd166'},rpm:{n:'Speed',u:'RPM',dp:0,r:[0,600],c:'#38d39f'}};
+const COL={SAFE:'var(--safe)',WARNING:'var(--warn)',DANGER:'var(--danger)'};
+let pts=[],last=null,lastRx=0,prev={},sim=false;
+const $=id=>document.getElementById(id);
+$('cards').innerHTML=Object.entries(S).map(([k,s])=>`<div class="panel card" id="c_${k}"><div class="lbl">${s.n}</div>
+<div class="v"><span id="v_${k}">--</span> <span class="u">${s.u}</span></div><span class="chip" id="s_${k}">--</span>
+<div class="bar"><i id="b_${k}"></i>${[s.w,s.d].filter(Boolean).map(x=>`<b style="left:${(x-s.r[0])/(s.r[1]-s.r[0])*100}%"></b>`).join('')}</div></div>`).join('');
+$('charts').innerHTML=Object.entries(S).map(([k,s])=>`<div class="panel"><h2>${s.n} (${s.u}) · last 5 min</h2><canvas id="g_${k}"></canvas></div>`).join('');
+setInterval(()=>$('clock').textContent=new Date().toLocaleTimeString(),1000);
+fetch('/api/info').then(r=>r.json()).then(i=>sim=i.simulate);
+function connect(){const w=new WebSocket((location.protocol=='https:'?'wss://':'ws://')+location.host+'/ws');
+ w.onmessage=e=>{const d=JSON.parse(e.data);if(d.snapshot){pts=d.snapshot;if(pts.length)last=pts[pts.length-1]}else add(d)};
+ w.onclose=()=>setTimeout(connect,1500)}
+connect();
+function add(d){pts.push(d);last=d;lastRx=Date.now();const c=Date.now()-300000;while(pts.length&&pts[0].ts<c)pts.shift();events(d);render()}
+function logAdd(lv,t){const e=document.createElement('div');e.style.color=COL[lv]||'inherit';e.textContent=new Date().toLocaleTimeString()+'  '+t;$('log').prepend(e)}
+function events(d){if(prev.overall&&prev.overall!==d.overall)logAdd(d.overall,'Machine state '+prev.overall+' → '+d.overall);
+ for(const k of ['temp','vib','cur','volt'])if(prev.st&&prev.st[k]!==d.st[k]&&d.st[k]!=='SAFE')logAdd(d.st[k],S[k].n+' '+d.st[k]+' ('+d[k]+' '+S[k].u+')');
+ prev={overall:d.overall,st:d.st}}
+function trend(k,lim){const n=pts.length;if(n<60)return null;const t0=pts[0].ts,xs=pts.map(p=>(p.ts-t0)/1000),ys=pts.map(p=>p[k]);
+ const mx=xs.reduce((a,b)=>a+b)/n,my=ys.reduce((a,b)=>a+b)/n;let sxy=0,sxx=0,syy=0;
+ for(let i=0;i<n;i++){sxy+=(xs[i]-mx)*(ys[i]-my);sxx+=(xs[i]-mx)**2;syy+=(ys[i]-my)**2}
+ const m=sxy/sxx;if(!(m>0)||sxy*sxy/(sxx*syy||1)<.5)return null;const fit=my+m*(xs[n-1]-mx);return fit>=lim?0:(lim-fit)/m}
+function fmt(s){return s<90?Math.round(s)+' s':s<5400?Math.round(s/60)+' min':s<172800?(s/3600).toFixed(1)+' h':(s/86400).toFixed(1)+' days'}
+function render(){const d=last;if(!d)return;
+ for(const k in S){const s=S[k],v=d[k];$('v_'+k).textContent=v==null?'--':(+v).toFixed(s.dp);
+  const st=(d.st&&d.st[k])||'';$('s_'+k).textContent=st||'RPM';const c=COL[st]||'var(--mu)';$('c_'+k).style.setProperty('--c',st?c:'var(--mu)');
+  $('b_'+k).style.width=Math.max(0,Math.min(100,(v-s.r[0])/(s.r[1]-s.r[0])*100))+'%'}
+ const o=d.overall;$('state').textContent=o;$('state').className=o;$('hero').style.setProperty('--st',COL[o]);
+ $('why').textContent=o==='SAFE'?'All monitored values are inside their limits.':'Check: '+Object.keys(d.st).filter(k=>d.st[k]!=='SAFE').map(k=>S[k].n).join(', ');
+ const base={temp:29,vib:450,cur:.5},lim={temp:40,vib:1500,cur:4};let mx=Math.max(0,(10-d.volt)/2);
+ for(const k in base)mx=Math.max(mx,(d[k]-base[k])/(lim[k]-base[k]));mx=Math.min(1,Math.max(0,mx));
+ const h=o==='DANGER'?Math.min(30,Math.round(100*(1-mx))):Math.round(100*(1-mx));$('health').textContent=h;
+ $('health').style.color=h>=70?COL.SAFE:h>=40?COL.WARNING:COL.DANGER;
+ let best=null;for(const k in lim){const t=trend(k,lim[k]);if(t!=null&&t<86400*3&&(!best||t<best.t))best={t,k}}
+ $('eta').textContent=best?'≈ '+fmt(best.t)+' ('+S[best.k].n+')':'No rising trend toward a limit';
+ $('motor').textContent=d.motor?'ON':'OFF';$('motor').style.color=d.motor?COL.SAFE:COL.DANGER;
+ for(const k in S)draw(k)}
+function draw(k){const s=S[k],cv=$('g_'+k),r=devicePixelRatio||1,W=cv.clientWidth,H=cv.clientHeight;cv.width=W*r;cv.height=H*r;
+ const g=cv.getContext('2d');g.scale(r,r);g.font='11px ui-monospace,Consolas,monospace';
+ const vals=pts.map(p=>p[k]).filter(v=>v!=null);if(vals.length<2){g.fillStyle='#8ba0b6';g.fillText('Waiting for data…',10,20);return}
+ let lo=Math.min(...vals),hi=Math.max(...vals);for(const x of [s.w,s.d])if(x&&x<hi*3+10&&x>lo-(hi-lo)*3-10){lo=Math.min(lo,x);hi=Math.max(hi,x)}
+ const pad=(hi-lo||1)*.12;lo-=pad;hi+=pad;const L=46,B=18,T=6,pw=W-L-8,ph=H-B-T,now=Date.now();
+ const X=t=>L+(t-(now-300000))/300000*pw,Y=v=>T+(1-(v-lo)/(hi-lo))*ph;
+ g.strokeStyle='#243447';g.fillStyle='#8ba0b6';for(let i=0;i<=3;i++){const v=lo+(hi-lo)*i/3,y=Y(v);g.beginPath();g.moveTo(L,y);g.lineTo(W-8,y);g.stroke();g.fillText(v.toFixed(s.dp>1?1:0),4,y+4)}
+ for(const [x,c] of [[s.w,'#ffb547'],[s.d,'#ff5a5f']])if(x&&x>lo&&x<hi){g.strokeStyle=c;g.setLineDash([5,4]);g.beginPath();g.moveTo(L,Y(x));g.lineTo(W-8,Y(x));g.stroke();g.setLineDash([])}
+ g.strokeStyle=s.c;g.lineWidth=1.8;g.beginPath();pts.forEach((p,i)=>{if(p[k]==null)return;i?g.lineTo(X(p.ts),Y(p[k])):g.moveTo(X(p.ts),Y(p[k]))});g.stroke()}
+async function motor(a){if(!confirm('Switch the motor '+a.toUpperCase()+'?'))return;
+ const r=await fetch('/api/motor',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a,pin:$('pin').value})});
+ const j=await r.json();$('mmsg').textContent=j.msg;$('mmsg').style.color=j.ok?'var(--safe)':'var(--danger)';logAdd(j.ok?'SAFE':'WARNING','Motor '+a.toUpperCase()+': '+j.msg)}
+setInterval(async()=>{if(Date.now()-lastRx<2500)return;try{const r=await fetch('/api/recent?since='+(last?last.ts:0));(await r.json()).forEach(add)}catch(e){}},700);
+setInterval(()=>{const p=$('pill'),ok=Date.now()-lastRx<3000;p.textContent=!lastRx||!ok?'NO DATA':sim?'SIMULATION':'LIVE';p.className='pill '+(!ok?'off':sim?'sim':'live')},1000);
+</script></body></html>
