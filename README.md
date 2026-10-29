@@ -18,7 +18,7 @@ The prototype uses a DC motor to represent an industrial machine. Sensor reading
 - **Motor control:** Relay-based switching and an L298N motor driver in the prototype setup.
 - **Monitoring dashboard:** Intended to present machine readings and status.
 
-> **Implementation status:** This repository currently contains the available reference and dashboard-link header files. The full firmware, dashboard source, and end-to-end integration are not included here. Features should be considered implemented only where supported by the available code and test results.
+> **Implementation status:** This repository includes the available ESP32 reference firmware, dashboard-link header, Python backend, dashboard interface, and Windows startup script. The backend supports serial communication with the ESP32 and provides a PIN-protected motor-control endpoint. Complete hardware integration and all monitoring features should be considered verified only where supported by actual testing.
 
 ## 🧰 Hardware Components
 
@@ -52,8 +52,9 @@ The prototype uses a DC motor to represent an industrial machine. Sensor reading
 
 ## 🚧 Current Limitations
 
-- The complete firmware is not currently included in this repository.
-- A full dashboard implementation is not included.
+- The repository contains reference firmware; verify the available firmware and its compatibility with the Python backend before running the complete system.
+- Live monitoring depends on a working ESP32 serial connection and compatible sensor data.
+- Motor control requires the appropriate PIN configuration and correctly wired hardware.
 - Sensor calibration and thresholds depend on the hardware and operating conditions.
 - Reliable failure prediction requires validated data and testing; sensor thresholds alone do not establish a predictive AI model.
 
